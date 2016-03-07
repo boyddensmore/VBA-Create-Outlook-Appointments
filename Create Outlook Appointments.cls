@@ -15,7 +15,26 @@ Option Explicit
 '           past/upcoming changes.
 ' Author:   Boyd Densmore, 2011
 '
+' Updated Feb 2016 to pull data from Maximo instead of assyst, plus a variety of enhancements.
+'
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+
+Const C_WONUM = 1
+Const C_DESCRIPTION = 2
+Const C_OWNER = 3
+Const C_OWNERGROUP = 4
+Const C_STATUS = 5
+Const C_ChgType = 6
+Const C_ChgCat = 7
+Const C_SCHEDSTART = 8
+Const C_SCHEDFINISH = 9
+Const C_CINAME = 10
+Const C_LONG_DESC = 11
+Const C_CHGREASON = 12
+Const C_NOT_IMPL_EFFECT = 13
+Const C_LOGS = 15
+Const LAST_UPDATE_DATE_CELL = "E1"
 
 
 
@@ -25,109 +44,125 @@ Private Sub cmdCreateApps_Click()
     Dim oNameSpace As Namespace
     Dim oFolder As Outlook.MAPIFolder
     Dim MyItem As Outlook.AppointmentItem
-    Dim Category As String
+    Dim ChgType As String
+    Dim ChgCat As String
     Dim ApptNum As Long
-    Dim Status As String
+    Dim STATUS As String
     Dim NewItem As Boolean
+
+
+    '''''''''''''''''''''''''''''''''''
+    ' Testing starting date for query
+    '''''''''''''''''''''''''''''''''''
 
     Set oApp = New Outlook.Application
     Set oNameSpace = oApp.GetNamespace("MAPI")
     'Set oFolder = oNameSpace.Folders("Mailbox - changecontrol@enmax.com").Folders("Calendar")
-    Set oFolder = oNameSpace.Folders("Public Folders - bdensmore@enmax.com").Folders("All Public Folders").Folders("Corporate").Folders("Information Technology").Folders("Forward Schedule of Change")
+    'Set oFolder = oNameSpace.Folders("Public Folders").Folders("All Public Folders").Folders("Corporate").Folders("Information Technology").Folders("Forward Schedule of Change")
+    Set oFolder = oNameSpace.PickFolder()
+    
 
     Dim EndRow As Integer
     Dim CurrentRow As Integer
 
+
+    ActiveWorkbook.Connections("MITPRD - FSC Change Details").ODBCConnection.BackgroundQuery = False
+    ActiveWorkbook.Connections("MITPRD - FSC Change Details").Refresh
+
     usrProgress.txtAdded = 0
     usrProgress.txtUpdated = 0
 
-    EndRow = LastRow("Data Prep")
+    EndRow = LastRow("Report")
     
     usrProgress.Show vbModeless
     
-    For CurrentRow = 2 To EndRow
+    For CurrentRow = 3 To EndRow
     
-    usrProgress.txtTotal = EndRow - 1
-    usrProgress.txtCurrent = CurrentRow - 1
-    usrProgress.txtPercent = Round((CurrentRow - 1) / (EndRow - 1), 2) * 100
+    usrProgress.txtTotal = EndRow - 2
+    usrProgress.txtCurrent = CurrentRow - 2
+    usrProgress.txtPercent = Round((CurrentRow - 2) / (EndRow - 2), 2) * 100
     
     usrProgress.Repaint
     
     On Error Resume Next
     
-        If oFolder.Items("R" & Sheets("Data Prep").Cells(CurrentRow, 5)) = "R" & Sheets("Data Prep").Cells(CurrentRow, 5) Then
-            If Err.Number <> 0 Then
-                Set MyItem = oFolder.Items.Add
-                usrProgress.txtAdded = usrProgress.txtAdded + 1
-                NewItem = True
-                Err.Clear
-            Else
-                Set MyItem = oFolder.Items("R" & Sheets("Data Prep").Cells(CurrentRow, 5))
-                usrProgress.txtUpdated = usrProgress.txtUpdated + 1
-                NewItem = False
-            End If
-        End If
-    
-        If Err.Number = 91 Then
-            MsgBox "You don't have permissions to add/update FSC items.  Please contact the Service Desk."
-        End If
-    
-        Category = Sheets("Data Prep").Cells(CurrentRow, 14)
-        Status = Sheets("Data Prep").Cells(CurrentRow, 15)
+
+    ' Check to see if the item already exists in the calendar
+        Set MyItem = oFolder.Items.Find("[Subject] = """ & Sheets("Report").Cells(CurrentRow, C_WONUM) & """")
         
-        If Category <> "" Then
-            Select Case Category
-                Case "RFC MINOR"
+        If MyItem Is Nothing Then
+            Set MyItem = oFolder.Items.Add
+            usrProgress.txtAdded = usrProgress.txtAdded + 1
+            NewItem = True
+            Err.Clear
+        Else
+            usrProgress.txtUpdated = usrProgress.txtUpdated + 1
+            NewItem = False
+        End If
+        
+        ChgType = Sheets("Report").Cells(CurrentRow, C_ChgType)
+        ChgCat = Sheets("Report").Cells(CurrentRow, C_ChgCat)
+        STATUS = Sheets("Report").Cells(CurrentRow, C_STATUS)
+        
+        If ChgCat <> "" Then
+            Select Case ChgCat
+                Case "Minor"
                     MyItem.Categories = "Green Category"
-                Case "RFC STANDARD"
+                Case "Pivot DC"
                     MyItem.Categories = "Green Category"
-                Case "RFC INFORMATION"
+                Case "Shaw Business"
                     MyItem.Categories = "Green Category"
-                Case "RFC MAJOR"
+                Case "Standard"
+                    MyItem.Categories = "Green Category"
+                Case "Significant"
+                    MyItem.Categories = "Yellow Category"
+                Case "Business Requirement"
                     MyItem.Categories = "Red Category"
-                Case "RFC MEDIUM"
-                    MyItem.Categories = "Orange Category"
-                Case "RFC URGENT"
-                    MyItem.Categories = "Red Category"
-                Case "RFC EMERGENCY"
+                Case "Incident"
                     MyItem.Categories = "Red Category"
                 Case Else
                     MyItem.Categories = ""
-                    Category = "UNCATEGORIZED"
             End Select
         End If
         
-        Select Case Status
-            Case "o"
-                MyItem.Location = Category & " - " & Sheets("Data Prep").Cells(CurrentRow, 6) & " (Open)"
-            Case Else
-                MyItem.Location = Category & " - " & Sheets("Data Prep").Cells(CurrentRow, 6) & " (Closed)"
+        Select Case STATUS
+            Case "CLOSE"
+                MyItem.Categories = "Closed Change"
+            Case "CAN"
+                MyItem.Categories = "Closed Change"
+            Case "COMP"
+                MyItem.Categories = "Closed Change"
+            Case "REVIEW"
                 MyItem.Categories = "Closed Change"
         End Select
         
-        MyItem.Subject = "R" & Sheets("Data Prep").Cells(CurrentRow, 5)
-        MyItem.Start = Sheets("Data Prep").Cells(CurrentRow, 3)
-        MyItem.End = Sheets("Data Prep").Cells(CurrentRow, 4)
+        'MyItem.Location = ChgType & " - " & ChgCat & " - (" & Sheets("Report").Cells(CurrentRow, C_STATUS) & ")"
+        MyItem.Location = Sheets("Report").Cells(CurrentRow, C_DESCRIPTION) & " - " & ChgType & ", " & ChgCat & " (" & Sheets("Report").Cells(CurrentRow, C_STATUS) & ")"
+        
+        MyItem.Subject = Sheets("Report").Cells(CurrentRow, C_WONUM)
+        MyItem.Start = Sheets("Report").Cells(CurrentRow, C_SCHEDSTART)
+        MyItem.End = Sheets("Report").Cells(CurrentRow, C_SCHEDFINISH)
         MyItem.ReminderSet = False
-        MyItem.Body = "Ticket number:" & vbTab & vbTab & "R" & Sheets("Data Prep").Cells(CurrentRow, 5) & vbCrLf
-        MyItem.Body = MyItem.Body & vbCrLf & "Logged By:" & vbTab & vbTab & Sheets("Data Prep").Cells(CurrentRow, 7)
-        MyItem.Body = MyItem.Body & vbCrLf & "Group:" & vbTab & vbTab & vbTab & Sheets("Data Prep").Cells(CurrentRow, 16)
-        MyItem.Body = MyItem.Body & vbCrLf & "Date Logged:" & vbTab & vbTab & Sheets("Data Prep").Cells(CurrentRow, 1)
-        MyItem.Body = MyItem.Body & vbCrLf & "Scheduled Start:" & vbTab & Sheets("Data Prep").Cells(CurrentRow, 3)
-        MyItem.Body = MyItem.Body & vbCrLf & "Scheduled End:" & vbTab & vbTab & Sheets("Data Prep").Cells(CurrentRow, 4)
-        MyItem.Body = MyItem.Body & vbCrLf & "Current stage:" & vbTab & vbTab & Sheets("Data Prep").Cells(CurrentRow, 6)
+        MyItem.Body = "Change #:" & vbTab & vbTab & Sheets("Report").Cells(CurrentRow, C_WONUM) & vbCrLf
+        MyItem.Body = MyItem.Body & vbCrLf & "Change Owner:" & vbTab & vbTab & Sheets("Report").Cells(CurrentRow, C_OWNER)
+        MyItem.Body = MyItem.Body & vbCrLf & "Change Owner Group:" & vbTab & vbTab & Sheets("Report").Cells(CurrentRow, C_OWNERGROUP)
+        MyItem.Body = MyItem.Body & vbCrLf & "Scheduled Start:" & vbTab & Sheets("Report").Cells(CurrentRow, C_SCHEDSTART)
+        MyItem.Body = MyItem.Body & vbCrLf & "Scheduled End:" & vbTab & vbTab & Sheets("Report").Cells(CurrentRow, C_SCHEDFINISH)
+        MyItem.Body = MyItem.Body & vbCrLf & "Affected CI:" & vbTab & vbTab & Sheets("Report").Cells(CurrentRow, C_CINAME)
+        MyItem.Body = MyItem.Body & vbCrLf & "Current status:" & vbTab & vbTab & Sheets("Report").Cells(CurrentRow, C_STATUS)
         MyItem.Body = MyItem.Body & vbCrLf
-        MyItem.Body = MyItem.Body & vbCrLf & "Description:" & vbCrLf & Sheets("Data Prep").Cells(CurrentRow, 13)
+        MyItem.Body = MyItem.Body & vbCrLf & "Summary:" & vbCrLf & Sheets("Report").Cells(CurrentRow, C_DESCRIPTION)
         MyItem.Body = MyItem.Body & vbCrLf
-        MyItem.Body = MyItem.Body & vbCrLf & "Justification:" & vbCrLf & Sheets("Data Prep").Cells(CurrentRow, 8)
+        MyItem.Body = MyItem.Body & vbCrLf & "Reason for Change:" & vbCrLf & Sheets("Report").Cells(CurrentRow, C_CHGREASON)
         MyItem.Body = MyItem.Body & vbCrLf
-        MyItem.Body = MyItem.Body & vbCrLf & "Risk:" & vbCrLf & Sheets("Data Prep").Cells(CurrentRow, 9)
+        MyItem.Body = MyItem.Body & vbCrLf & "Effect of not Implementing:" & vbCrLf & Sheets("Report").Cells(CurrentRow, C_NOT_IMPL_EFFECT)
         MyItem.Body = MyItem.Body & vbCrLf
-        MyItem.Body = MyItem.Body & vbCrLf & "Implementation:" & vbCrLf & Sheets("Data Prep").Cells(CurrentRow, 10)
+        MyItem.Body = MyItem.Body & vbCrLf & "Details:" & vbCrLf & Sheets("Report").Cells(CurrentRow, C_LONG_DESC)
         MyItem.Body = MyItem.Body & vbCrLf
-        MyItem.Body = MyItem.Body & vbCrLf & "Backout:" & vbCrLf & Sheets("Data Prep").Cells(CurrentRow, 11)
+        MyItem.Body = MyItem.Body & vbCrLf & "-----------------------------------------------"
         MyItem.Body = MyItem.Body & vbCrLf
-        MyItem.Body = MyItem.Body & vbCrLf & "Testing:" & vbCrLf & Sheets("Data Prep").Cells(CurrentRow, 12)
+        MyItem.Body = MyItem.Body & vbCrLf & "Work Logs:" & vbCrLf & Sheets("Report").Cells(CurrentRow, C_LOGS)
+        MyItem.Body = MyItem.Body & vbCrLf
         
         MyItem.Save
     
@@ -141,43 +176,7 @@ Private Sub cmdCreateApps_Click()
     MsgBox "Update complete", vbOKOnly, "Complete"
     
     Unload usrProgress
-
-End Sub
-
-Private Sub cmdPrepData_Click()
-
-    Dim EndRow As Integer
-    Dim CurrentRow As Integer
-    Dim CurrentCol As Integer
-    Dim CurrRow As Integer
-    Dim FirstUsedRow As Integer
-    Dim LastUsedRow As Integer
-    Dim rFound As Range
-    Dim sRef As String
-   
-    FirstUsedRow = 2
     
-    Sheets("Data Prep").Range("A2:" & SheetBoundaries("Data Prep")(2) & SheetBoundaries("Data Prep")(1)).Clear
-    
-    On Error Resume Next
-    
-    EndRow = LastRow("Report")
-    
-    For CurrentRow = 3 To EndRow
-    
-        For CurrentCol = 1 To 13
-            Sheets("Data Prep").Cells(CurrentRow - 1, CurrentCol) = Replace(Sheets("Report").Cells(CurrentRow, CurrentCol), Chr(13), "")
-        Next CurrentCol
-        
-        Sheets("Data Prep").Range("M" & CurrentRow - 1) = Replace(Sheets("Report").Range("N" & CurrentRow) & Sheets("Report").Range("O" & CurrentRow) & Sheets("Report").Range("P" & CurrentRow) & Sheets("Report").Range("Q" & CurrentRow) & Sheets("Report").Range("R" & CurrentRow) & Sheets("Report").Range("S" & CurrentRow) & Sheets("Report").Range("T" & CurrentRow) & Sheets("Report").Range("U" & CurrentRow), Chr(13), "")
-
-        Sheets("Data Prep").Range("N" & CurrentRow - 1) = Sheets("Report").Range("W" & CurrentRow)
-
-        Sheets("Data Prep").Range("O" & CurrentRow - 1) = Sheets("Report").Range("V" & CurrentRow)
-        
-        Sheets("Data Prep").Range("P" & CurrentRow - 1) = Sheets("Report").Range("Y" & CurrentRow)
-    
-    Next CurrentRow
-
+    Sheets("Report").Range(LAST_UPDATE_DATE_CELL) = Format(Now(), "dd-mm-yyyy hh:mm:ss")
 
 End Sub
